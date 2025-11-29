@@ -53,6 +53,8 @@ def create_deep_agent(
     debug: bool = False,
     name: str | None = None,
     cache: BaseCache | None = None,
+    enable_filesystem: bool = True,
+    enable_todos: bool = True,
 ) -> CompiledStateGraph:
     """Create a deep agent.
 
@@ -91,6 +93,11 @@ def create_deep_agent(
         debug: Whether to enable debug mode. Passed through to create_agent.
         name: The name of the agent. Passed through to create_agent.
         cache: The cache to use for the agent. Passed through to create_agent.
+        enable_filesystem: Whether to enable filesystem tools (ls, read_file, write_file,
+            edit_file, glob, grep, execute). Defaults to True. Set to False when the agent
+            works with in-memory data and doesn't need filesystem access.
+        enable_todos: Whether to enable the TodoListMiddleware for task tracking.
+            Defaults to True. Set to False for simple single-task agents.
 
     Returns:
         A configured deep agent.
@@ -110,28 +117,19 @@ def create_deep_agent(
         trigger = ("tokens", 170000)
         keep = ("messages", 6)
 
-    deepagent_middleware = [
-        TodoListMiddleware(),
-        FilesystemMiddleware(backend=backend),
-        SubAgentMiddleware(
-            default_model=model,
-            default_tools=tools,
-            subagents=subagents if subagents is not None else [],
-            default_middleware=[
-                TodoListMiddleware(),
-                FilesystemMiddleware(backend=backend),
-                SummarizationMiddleware(
-                    model=model,
-                    trigger=trigger,
-                    keep=keep,
-                    trim_tokens_to_summarize=None,
-                ),
-                AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
-                PatchToolCallsMiddleware(),
-            ],
-            default_interrupt_on=interrupt_on,
-            general_purpose_agent=True,
-        ),
+    # Build middleware list based on configuration
+    deepagent_middleware = []
+
+    # Optional: TodoListMiddleware for task tracking
+    if enable_todos:
+        deepagent_middleware.append(TodoListMiddleware())
+
+    # Optional: FilesystemMiddleware for file operations
+    if enable_filesystem:
+        deepagent_middleware.append(FilesystemMiddleware(backend=backend))
+
+    # Build subagent default middleware
+    subagent_middleware = [
         SummarizationMiddleware(
             model=model,
             trigger=trigger,
@@ -141,6 +139,34 @@ def create_deep_agent(
         AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
         PatchToolCallsMiddleware(),
     ]
+    if enable_todos:
+        subagent_middleware.insert(0, TodoListMiddleware())
+    if enable_filesystem:
+        subagent_middleware.insert(1 if enable_todos else 0, FilesystemMiddleware(backend=backend))
+
+    # SubAgentMiddleware for spawning sub-agents
+    deepagent_middleware.append(
+        SubAgentMiddleware(
+            default_model=model,
+            default_tools=tools,
+            subagents=subagents if subagents is not None else [],
+            default_middleware=subagent_middleware,
+            default_interrupt_on=interrupt_on,
+            general_purpose_agent=True,
+        )
+    )
+
+    # Always include these middleware
+    deepagent_middleware.extend([
+        SummarizationMiddleware(
+            model=model,
+            trigger=trigger,
+            keep=keep,
+            trim_tokens_to_summarize=None,
+        ),
+        AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
+        PatchToolCallsMiddleware(),
+    ])
     if middleware:
         deepagent_middleware.extend(middleware)
     if interrupt_on is not None:
