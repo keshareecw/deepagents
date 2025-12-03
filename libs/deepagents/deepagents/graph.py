@@ -55,6 +55,7 @@ def create_deep_agent(
     cache: BaseCache | None = None,
     enable_filesystem: bool = True,
     enable_todos: bool = True,
+    summarization_middleware_class: type[SummarizationMiddleware] | None = None,
 ) -> CompiledStateGraph:
     """Create a deep agent.
 
@@ -98,6 +99,9 @@ def create_deep_agent(
             works with in-memory data and doesn't need filesystem access.
         enable_todos: Whether to enable the TodoListMiddleware for task tracking.
             Defaults to True. Set to False for simple single-task agents.
+        summarization_middleware_class: Custom SummarizationMiddleware subclass to use
+            instead of the default. Useful for adding logging when context compaction
+            occurs. The class will be instantiated with the same parameters as the default.
 
     Returns:
         A configured deep agent.
@@ -117,6 +121,9 @@ def create_deep_agent(
         trigger = ("tokens", 170000)
         keep = ("messages", 6)
 
+    # Use custom summarization middleware class if provided, otherwise default
+    summarization_class = summarization_middleware_class or SummarizationMiddleware
+
     # Build middleware list based on configuration
     deepagent_middleware = []
 
@@ -130,7 +137,7 @@ def create_deep_agent(
 
     # Build subagent default middleware
     subagent_middleware = [
-        SummarizationMiddleware(
+        summarization_class(
             model=model,
             trigger=trigger,
             keep=keep,
@@ -158,7 +165,7 @@ def create_deep_agent(
 
     # Always include these middleware
     deepagent_middleware.extend([
-        SummarizationMiddleware(
+        summarization_class(
             model=model,
             trigger=trigger,
             keep=keep,
